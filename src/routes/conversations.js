@@ -16,19 +16,53 @@ conversationsRouter.get('/', async (req, res) => {
     [userId],
   );
 
-  const result = [];
-  for (const c of conversations) {
-    const [[last]] = await pool.query(
-      `SELECT id, sender_id AS senderId, created_at AS createdAt
-       FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT 1`,
-      [c.id],
-    );
-    const [[counted]] = await pool.query(
-      'SELECT COUNT(*) AS count FROM messages WHERE conversation_id = ?',
-      [c.id],
-    );
-    result.push({ ...c, lastMessage: last || null, messageCount: counted.count });
-  }
+  if (conversations.length === 0) return res.json([]);
+
+  const ids = conversations.map((c) => c.id);
+  const placeholders = ids.map(() => '?').join(',');
+
+  const [lastMessageRows] = await pool.query(
+    `SELECT m.conversation_id AS conversationId, m.id, m.sender_id AS senderId, m.created_at AS createdAt
+     FROM messages m
+     JOIN (
+       SELECT conversation_id, MAX(id) AS maxId
+       FROM messages
+       WHERE conversation_id IN (${placeholders})
+       GROUP BY conversation_id
+     ) t ON t.conversation_id = m.conversation_id AND t.maxId = m.id`,
+    ids,
+  );
+
+  const [countMessageRows] = await pool.query(
+    `SELECT conversation_id AS conversationId, COUNT(*) AS count
+     FROM messages WHERE conversation_id IN (${placeholders})
+     GROUP BY conversation_id`,
+    ids,
+  );
+
+  const [lastReadMessageRows] = await pool.query(
+    `SELECT conversation_id AS conversationId, last_read_message_id AS lastReadId
+     FROM conversation_reads WHERE user_id = ? AND conversation_id IN (${placeholders})`,
+    [userId, ...ids],
+  );
+
+  const lastByConv = new Map(lastMessageRows.map((r) => [r.conversationId, r]));
+  const countByConv = new Map(countMessageRows.map((r) => [r.conversationId, r.count]));
+  const readByConv = new Map(lastReadMessageRows.map((r) => [r.conversationId, r.lastReadId]));
+
+  const result = conversations.map((c) => {
+    const last = lastByConv.get(c.id) || null;
+    const lastReadId = readByConv.get(c.id) ?? 0;
+
+    const hasUnread = !!last && last.id > lastReadId && last.senderId !== userId;
+
+    return {
+      ...c,
+      lastMessage: last ? { id: last.id, senderId: last.senderId, createdAt: last.createdAt } : null,
+      messageCount: countByConv.get(c.id) ?? 0,
+      hasUnread,
+    };
+  });
 
   res.json(result);
 });
@@ -49,4 +83,27 @@ conversationsRouter.post('/', async (req, res) => {
   }
 
   res.status(201).json({ id, title, participantIds: participantIds.map(Number) });
+});
+
+conversationsRouter.post('/:id/read', async (req, res) => {
+  const conversationId = Number(req.params.id);
+  const userId = Number(req.body?.userId);
+  if (!conversationId || !userId) {
+    return res.status(400).json({ error: 'conversationId and userId are required' });
+  }
+
+  const [[last]] = await pool.query(
+    'SELECT MAX(id) AS maxId FROM messages WHERE conversation_id = ?',
+    [conversationId],
+  );
+  const lastId = last?.maxId ?? 0;
+
+  await pool.execute(
+    `INSERT INTO conversation_reads (conversation_id, user_id, last_read_message_id)
+     VALUES (?, ?, ?)
+     ON DUPLICATE KEY UPDATE last_read_message_id = GREATEST(last_read_message_id, VALUES(last_read_message_id))`,
+    [conversationId, userId, lastId],
+  );
+
+  res.json({ conversationId, lastReadMessageId: lastId });
 });

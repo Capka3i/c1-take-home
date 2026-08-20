@@ -1,12 +1,12 @@
 import http from 'node:http';
 import express from 'express';
-import { config } from './config.ts';
-import { waitForMysql } from './db/mysql.ts';
-import { connectMongo } from './db/mongo.ts';
+import { config } from './config';
+import { waitForMysql } from './db/mysql';
+import { connectMongo } from './db/mongo';
 import { conversationsRouter } from './routes/conversations.js';
 import { messagesRouter } from './routes/messages.js';
 import { searchRouter } from './routes/search.js';
-import { attachWs } from './ws/hub.ts';
+import { attachWs } from './ws/hub';
 
 const app = express();
 app.use(express.json());

@@ -1,5 +1,5 @@
 import { MongoClient, type Db } from 'mongodb';
-import { config } from '../config.ts';
+import { config } from '../config';
 
 const client = new MongoClient(config.mongoUrl);
 let db: Db | undefined;

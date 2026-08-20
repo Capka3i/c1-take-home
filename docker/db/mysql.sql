@@ -18,12 +18,21 @@ CREATE TABLE conversation_participants (
   PRIMARY KEY (conversation_id, user_id)
 );
 
+CREATE TABLE conversation_reads (
+  conversation_id INT NOT NULL,
+  user_id INT NOT NULL,
+  last_read_message_id BIGINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (conversation_id, user_id)
+);
+
 CREATE TABLE messages (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   conversation_id INT NOT NULL,
   sender_id INT NOT NULL,
   client_id VARCHAR(64) NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_messages_conversation (conversation_id, id),
+  UNIQUE KEY uq_messages_client (conversation_id, client_id)
 );
 
 INSERT INTO users (id, name, email) VALUES

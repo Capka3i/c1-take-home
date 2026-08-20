@@ -1,7 +1,9 @@
 const userId = 1;
 let ws;
+let reconnectTimer;
 let activeConversation;
 let conversations = [];
+const sentClientIds = new Set();
 
 async function loadConversations() {
   const res = await fetch(`/api/conversations?userId=${userId}`);
@@ -17,35 +19,44 @@ function renderSidebar() {
     const li = document.createElement('li');
     if (c.id === activeConversation) li.className = 'active';
     li.innerHTML =
-      `<span>${c.title} (${c.messageCount})</span>` + (c.unread ? '<span class="dot">●</span>' : '');
+      `<span>${c.title} (${c.messageCount})</span>` + (c.hasUnread ? '<span class="dot">●</span>' : '');
     li.onclick = () => openConversation(c.id, c.title);
     list.appendChild(li);
   }
 }
 
 function connectWs() {
-  if (ws) ws.close();
+  if (ws) {
+    ws.onclose = null;
+    ws.close();
+  }
   ws = new WebSocket(`ws://${location.host}/`);
   ws.onopen = () =>
     ws.send(JSON.stringify({ type: 'subscribe', conversationIds: conversations.map((c) => c.id) }));
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
     if (msg.type !== 'message') return;
+    if (msg.clientId && sentClientIds.has(msg.clientId)) return;
     const c = conversations.find((x) => x.id === msg.conversationId);
     if (c) c.messageCount += 1;
     if (msg.conversationId === activeConversation) {
       appendMessage(msg);
+      markRead(activeConversation);
     } else if (c) {
-      c.unread = true;
+      c.hasUnread = true;
     }
     renderSidebar();
+  };
+  ws.onclose = () => {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(connectWs, 1000);
   };
 }
 
 async function openConversation(id, title) {
   activeConversation = id;
   const c = conversations.find((x) => x.id === id);
-  if (c) c.unread = false;
+  if (c) c.hasUnread = false;
   renderSidebar();
 
   document.getElementById('title').textContent = title;
@@ -54,6 +65,15 @@ async function openConversation(id, title) {
   const pane = document.getElementById('messages');
   pane.innerHTML = '';
   for (const m of messages) appendMessage(m);
+  markRead(id);
+}
+
+function markRead(conversationId) {
+  fetch(`/api/conversations/${conversationId}/read`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId }),
+  }).catch(() => {});
 }
 
 function appendMessage(m) {
@@ -71,15 +91,18 @@ document.getElementById('composer').onsubmit = async (e) => {
   const body = input.value.trim();
   if (!body || !activeConversation) return;
   input.value = '';
+
+  const clientId = crypto.randomUUID();
+  sentClientIds.add(clientId);
+  appendMessage({ senderId: userId, body });
+  const c = conversations.find((x) => x.id === activeConversation);
+  if (c) c.messageCount += 1;
+  renderSidebar();
+
   await fetch('/api/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      conversationId: activeConversation,
-      senderId: userId,
-      body,
-      clientId: crypto.randomUUID(),
-    }),
+    body: JSON.stringify({ conversationId: activeConversation, senderId: userId, body, clientId }),
   });
 };
 

@@ -19,8 +19,10 @@ messagesRouter.post('/', async (req, res) => {
     clientId: clientId ?? null,
   });
 
-  broadcast(msg.conversationId, { type: 'message', ...msg });
-  res.status(201).json(msg);
+  if (!msg.duplicate) {
+    broadcast(msg.conversationId, { type: 'message', ...msg });
+  }
+  res.status(msg.duplicate ? 200 : 201).json(msg);
 });
 
 messagesRouter.get('/', async (req, res) => {

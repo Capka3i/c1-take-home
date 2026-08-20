@@ -1,4 +1,3 @@
-// ДОДАНО (nickname login): особу більше не хардкодимо — беремо з логіну і зберігаємо.
 let userId;
 let userName;
 let ws;

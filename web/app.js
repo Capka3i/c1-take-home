@@ -1,9 +1,70 @@
-const userId = 1;
+// ДОДАНО (nickname login): особу більше не хардкодимо — беремо з логіну і зберігаємо.
+let userId;
+let userName;
 let ws;
 let reconnectTimer;
 let activeConversation;
 let conversations = [];
 const sentClientIds = new Set();
+
+function init() {
+  const saved = localStorage.getItem('relayUser');
+  if (saved) {
+    const u = JSON.parse(saved);
+    userId = u.id;
+    userName = u.name;
+    startApp();
+  } else {
+    showLogin();
+  }
+}
+
+function showLogin() {
+  document.getElementById('login').style.display = 'flex';
+  document.getElementById('app').style.display = 'none';
+}
+
+function startApp() {
+  document.getElementById('login').style.display = 'none';
+  document.getElementById('app').style.display = 'flex';
+  document.getElementById('me').textContent = userName;
+  loadConversations();
+}
+
+document.getElementById('loginForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const name = document.getElementById('nick').value.trim();
+  if (!name) return;
+  const res = await fetch('/api/users/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  const u = await res.json();
+  userId = u.id;
+  userName = u.name;
+  localStorage.setItem('relayUser', JSON.stringify(u));
+  startApp();
+};
+
+document.getElementById('logout').onclick = () => {
+  localStorage.removeItem('relayUser');
+  if (ws) {
+    ws.onclose = null;
+    ws.close();
+  }
+  clearTimeout(reconnectTimer);
+  userId = null;
+  userName = null;
+  activeConversation = null;
+  conversations = [];
+  document.getElementById('conversations').innerHTML = '';
+  document.getElementById('messages').innerHTML = '';
+  document.getElementById('title').textContent = 'Pick a conversation';
+  clearTyping();
+  document.getElementById('nick').value = '';
+  showLogin();
+};
 
 async function loadConversations() {
   const res = await fetch(`/api/conversations?userId=${userId}`);
@@ -35,11 +96,19 @@ function connectWs() {
     ws.send(JSON.stringify({ type: 'subscribe', conversationIds: conversations.map((c) => c.id) }));
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
+
+    if (msg.type === 'typing') {
+      if (msg.conversationId === activeConversation && msg.userId !== userId) {
+        showTyping(msg.name, msg.userId);
+      }
+      return;
+    }
     if (msg.type !== 'message') return;
     if (msg.clientId && sentClientIds.has(msg.clientId)) return;
     const c = conversations.find((x) => x.id === msg.conversationId);
     if (c) c.messageCount += 1;
     if (msg.conversationId === activeConversation) {
+      clearTyping();
       appendMessage(msg);
       markRead(activeConversation);
     } else if (c) {
@@ -59,6 +128,7 @@ async function openConversation(id, title) {
   if (c) c.hasUnread = false;
   renderSidebar();
 
+  clearTyping();
   document.getElementById('title').textContent = title;
   const res = await fetch(`/api/messages?conversationId=${id}`);
   const messages = await res.json();
@@ -66,6 +136,18 @@ async function openConversation(id, title) {
   pane.innerHTML = '';
   for (const m of messages) appendMessage(m);
   markRead(id);
+}
+
+let typingTimer;
+function showTyping(name, uid) {
+  const el = document.getElementById('typing');
+  el.textContent = `${name || '#' + uid} друкує…`;
+  clearTimeout(typingTimer);
+  typingTimer = setTimeout(clearTyping, 3000);
+}
+function clearTyping() {
+  clearTimeout(typingTimer);
+  document.getElementById('typing').textContent = '';
 }
 
 function markRead(conversationId) {
@@ -80,10 +162,21 @@ function appendMessage(m) {
   const pane = document.getElementById('messages');
   const div = document.createElement('div');
   div.className = 'msg';
-  div.textContent = `#${m.senderId}: ${m.body}`;
+
+  const who = m.senderName || '#' + m.senderId;
+  div.textContent = `${who}: ${m.body}`;
   pane.appendChild(div);
   pane.scrollTop = pane.scrollHeight;
 }
+
+let lastTypingSent = 0;
+document.getElementById('text').addEventListener('input', () => {
+  if (!activeConversation || !ws || ws.readyState !== WebSocket.OPEN) return;
+  const now = Date.now();
+  if (now - lastTypingSent < 1500) return;
+  lastTypingSent = now;
+  ws.send(JSON.stringify({ type: 'typing', conversationId: activeConversation, userId, name: userName }));
+});
 
 document.getElementById('composer').onsubmit = async (e) => {
   e.preventDefault();
@@ -94,7 +187,7 @@ document.getElementById('composer').onsubmit = async (e) => {
 
   const clientId = crypto.randomUUID();
   sentClientIds.add(clientId);
-  appendMessage({ senderId: userId, body });
+  appendMessage({ senderId: userId, senderName: userName, body });
   const c = conversations.find((x) => x.id === activeConversation);
   if (c) c.messageCount += 1;
   renderSidebar();
@@ -112,7 +205,7 @@ document.getElementById('newConv').onclick = async () => {
   await fetch('/api/conversations', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, participantIds: [userId, 2] }),
+    body: JSON.stringify({ title, participantIds: [userId] }),
   });
   await loadConversations();
 };
@@ -140,14 +233,16 @@ function renderResults(q, results) {
   }
   for (const r of results) {
     const div = document.createElement('div');
-    div.className = 'msg';
-    div.style.cursor = 'pointer';
+    div.className = 'result';
     const title = document.createElement('strong');
     title.textContent = r.conversationTitle ?? '#' + r.conversationId;
-    div.append(title, ' — ' + (r.body ?? ''));
+    const snippet = document.createElement('span');
+    snippet.className = 'snippet';
+    snippet.textContent = r.body ?? '';
+    div.append(title, snippet);
     div.onclick = () => openConversation(r.conversationId, r.conversationTitle ?? '#' + r.conversationId);
     pane.appendChild(div);
   }
 }
 
-loadConversations();
+init();

@@ -1,4 +1,5 @@
 import express from 'express';
+import { searchMessages } from '../services/search.ts';
 
 export const searchRouter = express.Router();
 
@@ -8,5 +9,6 @@ export const searchRouter = express.Router();
 searchRouter.get('/', async (req, res) => {
   const q = String(req.query.q || '').trim();
   if (!q) return res.json([]);
-  res.json([]);
+
+  res.json(await searchMessages(q));
 });

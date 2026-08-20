@@ -6,11 +6,13 @@ import { connectMongo } from './db/mongo';
 import { conversationsRouter } from './routes/conversations.js';
 import { messagesRouter } from './routes/messages.js';
 import { searchRouter } from './routes/search.js';
+import { usersRouter } from './routes/users.js';
 import { attachWs } from './ws/hub';
 
 const app = express();
 app.use(express.json());
 app.use(express.static('web'));
+app.use('/api/users', usersRouter);
 app.use('/api/conversations', conversationsRouter);
 app.use('/api/messages', messagesRouter);
 app.use('/api/search', searchRouter);

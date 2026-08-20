@@ -140,7 +140,7 @@ async function openConversation(id, title) {
 let typingTimer;
 function showTyping(name, uid) {
   const el = document.getElementById('typing');
-  el.textContent = `${name || '#' + uid} друкує…`;
+  el.textContent = `${name || '#' + uid} typing…`;
   clearTimeout(typingTimer);
   typingTimer = setTimeout(clearTyping, 3000);
 }
